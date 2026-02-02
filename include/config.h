@@ -1,6 +1,10 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
+// Feature toggles
+#define DEBUG_MODE              // Comment out to disable debug mode (shows formatted status instead of raw CAN)
+#define ENABLE_WEBSERVER        // Comment out to disable web server
+
 // Serial configuration
 #define SERIAL_BAUD_RATE 115200
 
@@ -9,6 +13,11 @@
 
 // MCP2515 crystal frequency
 #define MCP2515_CRYSTAL_8MHZ   // Options: MCP2515_CRYSTAL_8MHZ, MCP2515_CRYSTAL_16MHZ
+
+// WiFi AP configuration (for web server)
+#define WIFI_AP_SSID "CANDebugger"
+#define WIFI_AP_PASSWORD "candebugger123"  // Min 8 characters
+#define WIFI_AP_CHANNEL 6
 
 // Non-blocking CAN operation timings
 #define BUTTON_PRESS_DURATION_MS 150   // Button press/release delay

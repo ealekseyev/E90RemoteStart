@@ -11,6 +11,12 @@ enum WindowPosition {
     WINDOW_ROLL_UP
 };
 
+enum IgnitionStatus {
+    IGNITION_OFF,      // Engine flag off
+    IGNITION_SECOND,   // Engine flag on, RPM < 400 (position 2)
+    IGNITION_RUNNING   // Engine flag on, RPM >= 400 (engine running)
+};
+
 // Window selection flags (can be OR'd together)
 #define DRIVER_FRONT    0x01
 #define PASSENGER_FRONT 0x02
@@ -28,7 +34,7 @@ public:
     // Read-only status functions
     bool isBraking() const;
     bool isDoorLocked() const;
-    bool isDoorOpen() const;
+    bool isDoorOpen(uint8_t doorMask = 0xFF) const;  // 0xFF = any door
     bool isDriverDoorOpen() const;
     bool areMirrorsRetracted() const;
     bool isParkingBrakeOn() const;
@@ -38,17 +44,21 @@ public:
     uint8_t getDomeLightBrightness() const;
     float getBatteryVoltage() const;
     bool isEngineRunning() const;
+    IgnitionStatus getIgnitionStatus() const;
     uint8_t getWindowPosition(uint8_t window) const;
     uint16_t getEngineRPM() const;
     uint8_t getThrottlePosition() const;
+    float getSteeringWheelAngle() const;
 
     // Writable control functions
     bool setWindow(uint8_t windowMask, WindowPosition pos);
-    bool setDriverSeatHeater(bool on);
     bool setDomeLight(bool on);
 
     // CAN frame sending (public for helper functions)
     bool sendCanFrame(uint16_t id, const uint8_t* data, uint8_t len);
+
+    // non-returning actions
+    void playGong();
 
 private:
     CarControl();
@@ -63,6 +73,10 @@ private:
         bool doorLocked;
         bool doorOpen;
         bool driverDoorOpen;
+        bool doorOpenDriverFront;
+        bool doorOpenPassengerFront;
+        bool doorOpenDriverRear;
+        bool doorOpenPassengerRear;
         bool mirrorsRetracted;
         bool parkingBrakeOn;
         uint16_t steeringButtonPressed;
@@ -70,13 +84,14 @@ private:
         uint8_t brakeStatus;
         uint8_t domeLightBrightness;
         float batteryVoltage;
-        bool engineRunning;
+        bool engineFlagFromCAN;  // Raw engine flag from 0x3B4 byte 2
         uint8_t windowPosDriverFront;
         uint8_t windowPosPassengerFront;
         uint8_t windowPosDriverRear;
         uint8_t windowPosPassengerRear;
         uint16_t engineRPM;
         uint8_t throttlePosition;
+        float steeringWheelAngle;  // Degrees: positive=clockwise, negative=counter-clockwise
     } state;
 
     // Vector of update functions (helpers) - each takes CarControl* and returns false when done

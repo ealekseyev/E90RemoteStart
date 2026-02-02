@@ -5,43 +5,10 @@
 
 CarControl* CarControl::instance = nullptr;
 
-// Minimal command structs for communication with helpers
-static struct { bool on; bool pending; } seatHeaterCommand = {false, false};
+// Minimal command struct for communication with helpers
 static struct { bool pending; } domeLightCommand = {false};
 
 // ============ Update Helper Functions (self-contained with static state) ============
-
-static bool updateSeatHeaterControl(CarControl* ctrl) {
-    // All state is static inside this function
-    static unsigned long pressTime = 0;
-    static bool active = false;
-
-    // Handle new command
-    if (seatHeaterCommand.pending) {
-        seatHeaterCommand.pending = false;
-        active = true;
-        pressTime = millis();
-
-        // Send press frame
-        uint8_t pressData[8] = {0};
-        pressData[0] = seatHeaterCommand.on ? 0xd0 : 0xc0;
-        ctrl->sendCanFrame(0x1e7, pressData, 1);
-    }
-
-    if (!active) return false;
-
-    unsigned long currentTime = millis();
-
-    // Check if it's time to send release frame
-    if (currentTime - pressTime >= BUTTON_PRESS_DURATION_MS) {
-        uint8_t releaseData[8] = {0xc0};
-        ctrl->sendCanFrame(0x1e7, releaseData, 1);
-        active = false;
-        return false;  // Done
-    }
-
-    return true;  // Continue
-}
 
 static bool updateDomeLightControl(CarControl* ctrl) {
     // All state is static inside this function
@@ -115,8 +82,20 @@ bool CarControl::isDoorLocked() const {
     return state.doorLocked;
 }
 
-bool CarControl::isDoorOpen() const {
-    return state.doorOpen;
+bool CarControl::isDoorOpen(uint8_t doorMask) const {
+    // If checking specific door(s)
+    if (doorMask != 0xFF) {
+        bool anyOpen = false;
+        if ((doorMask & DRIVER_FRONT) && state.doorOpenDriverFront) anyOpen = true;
+        if ((doorMask & PASSENGER_FRONT) && state.doorOpenPassengerFront) anyOpen = true;
+        if ((doorMask & DRIVER_REAR) && state.doorOpenDriverRear) anyOpen = true;
+        if ((doorMask & PASSENGER_REAR) && state.doorOpenPassengerRear) anyOpen = true;
+        return anyOpen;
+    }
+
+    // Check if any door is open
+    return state.doorOpenDriverFront || state.doorOpenPassengerFront ||
+           state.doorOpenDriverRear || state.doorOpenPassengerRear;
 }
 
 bool CarControl::isDriverDoorOpen() const {
@@ -170,7 +149,21 @@ float CarControl::getBatteryVoltage() const {
 }
 
 bool CarControl::isEngineRunning() const {
-    return state.engineRunning;
+    // Engine is running only when CAN flag is on AND RPM > 400
+    return state.engineFlagFromCAN && (state.engineRPM > 400);
+}
+
+IgnitionStatus CarControl::getIgnitionStatus() const {
+    // If RPM > 400, engine is definitely running regardless of CAN flag
+    if (state.engineRPM > 400) {
+        return IGNITION_RUNNING;
+    }
+
+    if (!state.engineFlagFromCAN) {
+        return IGNITION_OFF;  // Engine flag off -> ignition off
+    }
+
+    return IGNITION_SECOND;  // Flag on, low RPM -> position 2
 }
 
 uint8_t CarControl::getWindowPosition(uint8_t window) const {
@@ -188,6 +181,10 @@ uint16_t CarControl::getEngineRPM() const {
 
 uint8_t CarControl::getThrottlePosition() const {
     return state.throttlePosition;
+}
+
+float CarControl::getSteeringWheelAngle() const {
+    return state.steeringWheelAngle;
 }
 
 // ============ Writable Control Functions ============
@@ -226,29 +223,6 @@ bool CarControl::setWindow(uint8_t windowMask, WindowPosition pos) {
 
     // Send single frame
     return sendCanFrame(0x0fa, data, 3);
-}
-
-bool CarControl::setDriverSeatHeater(bool on) {
-    if (!canBus) return false;
-
-    // Set command for helper
-    seatHeaterCommand.on = on;
-    seatHeaterCommand.pending = true;
-
-    // Add helper to queue if not already there
-    bool alreadyInQueue = false;
-    for (auto fn : updateFunctions) {
-        if (fn == &updateSeatHeaterControl) {
-            alreadyInQueue = true;
-            break;
-        }
-    }
-
-    if (!alreadyInQueue) {
-        updateFunctions.push_back(&updateSeatHeaterControl);
-    }
-
-    return true;
 }
 
 bool CarControl::setDomeLight(bool on) {
@@ -325,6 +299,19 @@ void CarControl::parseCanFrame(uint16_t id, const uint8_t* data, uint8_t len) {
             }
             break;
 
+        case 0x0c8:  // Steering wheel angle
+            if (len > 1) {
+                // Bytes 0-1: little-endian 16-bit raw angle
+                uint16_t rawAngle = (data[1] << 8) | data[0];
+
+                // Convert to signed angle in degrees
+                // Values 0-32767: clockwise (positive)
+                // Values 32768-65535: counter-clockwise (negative)
+                int16_t signedAngle = (rawAngle > 32767) ? (rawAngle - 65536) : rawAngle;
+                state.steeringWheelAngle = signedAngle / 23.0;
+            }
+            break;
+
         case 0x0e2:  // Central locking status
             state.doorLocked = (data[0] == 2);
             break;
@@ -371,13 +358,23 @@ void CarControl::parseCanFrame(uint16_t id, const uint8_t* data, uint8_t len) {
 
         case 0x2b2:  // Brake status (detailed)
             if (len > 0) {
-                state.brakeStatus = data[0];
+                state.brakeStatus = (min(data[0], 0x80) * 255) / 0x80;
             }
             break;
 
         case 0x2f1:  // Seat belt
             if (len > 2) {
-                state.seatBeltPlugged = (getNibble(data[2], 0) == 0xd);
+                state.seatBeltPlugged = (getNibble(data[2], 0) & 0b0001) > 0;
+            }
+            break;
+
+        case 0x2fc:  // Individual door states
+            if (len > 1) {
+                // Byte 1: bit-based door open states
+                state.doorOpenDriverFront = getBit(data[1], 0);      // Bit 0 (0x01)
+                state.doorOpenPassengerFront = getBit(data[1], 2);   // Bit 2 (0x04)
+                state.doorOpenDriverRear = getBit(data[1], 4);       // Bit 4 (0x10)
+                state.doorOpenPassengerRear = getBit(data[1], 6);    // Bit 6 (0x40)
             }
             break;
 
@@ -387,7 +384,8 @@ void CarControl::parseCanFrame(uint16_t id, const uint8_t* data, uint8_t len) {
                 state.batteryVoltage = (raw - 0xf000) / 68.0;
             }
             if (len > 2) {
-                state.engineRunning = (data[2] == 0x00);
+                // Store raw engine flag (true when byte 2 = 0x00)
+                state.engineFlagFromCAN = (data[2] == 0x00);
             }
             break;
 
@@ -472,4 +470,16 @@ void CarControl::updateFrame_0x0ea(const CANFrame& frame) {
 void CarControl::updateFrame_0x0ee(const CANFrame& frame) {
     // TODO: Implement when function is discovered
     (void)frame;  // Suppress unused parameter warning
+}
+
+void CarControl::playGong() {
+    CANFrame frame;
+    frame.id=0x24b;
+    frame.data[0] = 0x01;
+    frame.data[1] = 0xf8;
+    frame.dlc=2;
+    sendCanFrame(0x24b, frame.data, 2);
+    frame.data[0] = 0x00;
+    delay(150);
+    sendCanFrame(0x24b, frame.data, 2);
 }

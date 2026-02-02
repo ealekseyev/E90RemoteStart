@@ -3,15 +3,21 @@
 #include "config.h"
 #include "hardwarePins.h"
 #include "CarControl.hpp"
+#include "ClimateControl.hpp"
+#include "CustomKeys.h"
+#ifdef ENABLE_WEBSERVER
+#include "WebServer.hpp"
+#endif
 
 CANBus can(MCP2515_CS_PIN);
 CarControl* carControl = CarControl::getInstance();
-
-#define DEBUG_MODE
+ClimateControl* climateControl = ClimateControl::getInstance();
+CustomKeys* customKeys = CustomKeys::getInstance();
+#ifdef ENABLE_WEBSERVER
+VehicleWebServer* webServer = VehicleWebServer::getInstance();
+#endif
 
 String serialBuffer = "";
-bool custom_pressed = false;
-bool last_custom_pressed = false;
 
 uint8_t hexCharToNibble(char c) {
     if (c >= '0' && c <= '9') return c - '0';
@@ -57,40 +63,30 @@ void setup() {
 
     can.init(CAN_BITRATE);
     carControl->init(&can);
+    climateControl->init(&can);
+    customKeys->init(carControl);
     Serial.println("CAN Ready");
+
+#ifdef ENABLE_WEBSERVER
+    webServer->init(carControl, climateControl);
+#endif
 }
 
 void loop() {
     // CRITICAL: Call update() every loop cycle for non-blocking timing
     carControl->update();
-
-    // Test: Toggle dome light every 2 seconds
-    // static unsigned long lastToggle = 0;
-    // static bool domeState = false;
-    // if (millis() - lastToggle >= 1000) {
-    //     lastToggle = millis();
-    //     domeState = !domeState;
-    //     carControl->setDomeLight(domeState);
-    //     //Serial.print("Dome light: ");
-    //     //Serial.println(domeState ? "ON" : "OFF");
-    // }
+    climateControl->update();
+    customKeys->update();
+#ifdef ENABLE_WEBSERVER
+    webServer->update();
+#endif
 
     CANFrame frame;
     if (can.read(frame)) {
         // Pass to CarControl for state tracking
         carControl->onCanFrameReceived(frame);
+        climateControl->onCanFrameReceived(frame);
 
-        // Debounce custom button
-        custom_pressed = carControl->isSteeringButtonPressed(STEERING_BTN_CUSTOM);
-        if (custom_pressed && !last_custom_pressed) {
-            // Check window positions and toggle based on state
-            uint8_t posPassengerRear = carControl->getWindowPosition(PASSENGER_REAR);
-            uint8_t posDriverRear = carControl->getWindowPosition(DRIVER_REAR);
-
-            WindowPosition targetPos = (posPassengerRear < 128) ? WINDOW_ROLL_DOWN : WINDOW_ROLL_UP;
-            carControl->setWindow(PASSENGER_REAR | DRIVER_REAR, targetPos);
-        }
-        last_custom_pressed = custom_pressed;
         // Print frame for debugging
 #ifdef DEBUG_MODE
         Serial.print("RX: 0x");
@@ -107,7 +103,18 @@ void loop() {
         Serial.println();
 #else
         Serial.printf("Engine ");
-        Serial.printf(carControl->isEngineRunning()?"ON":"OFF");
+        IgnitionStatus ignition = carControl->getIgnitionStatus();
+        switch (ignition) {
+            case IGNITION_OFF:
+                Serial.printf("OFF");
+                break;
+            case IGNITION_SECOND:
+                Serial.printf("SECOND");
+                break;
+            case IGNITION_RUNNING:
+                Serial.printf("RUNNING");
+                break;
+        }
         Serial.printf(", Battery: %0.2fV", carControl->getBatteryVoltage());
         Serial.printf(", RPM: %u", carControl->getEngineRPM());
 
@@ -118,6 +125,13 @@ void loop() {
             uint8_t percent = (throttle * 100) / 254;
             Serial.printf(", Throttle: %u%%", percent);
         }
+
+        Serial.printf(", Steering: %.1f°", carControl->getSteeringWheelAngle());
+
+        Serial.printf(", Climate - Fan: %u", climateControl->getFanSpeed());
+        Serial.printf(" | Driver: %dC", climateControl->getDriverTemp());
+        Serial.printf(" | Passenger: %dC", climateControl->getPassengerTemp());
+        Serial.printf(" | AC: %s", climateControl->isACActive() ? "ON" : "OFF");
         Serial.println();
 #endif
 

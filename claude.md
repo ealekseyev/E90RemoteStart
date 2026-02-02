@@ -6,16 +6,18 @@ ESP32-based CAN bus debugger and controller for BMW E90 vehicles. Enables readin
 ## Project Structure
 ```
 CANDebugger/
-└── esp/CANDebuggerFirmware/    # Main project directory (PlatformIO)
-    ├── src/main.cpp             # Main application loop
-    ├── lib/CarControl/          # Vehicle state management & CAN parsing
-    ├── lib/CANBus/              # MCP2515 CAN interface driver
-    ├── CAN_IDs.md               # **CAN protocol documentation**
-    └── client/                  # Python CAN debugging tools
-        ├── can_reader.py        # CAN frame reader/logger
-        ├── can_sender.py        # CAN frame sender
-        ├── nibble_monitor.py    # Nibble-level CAN analyzer
-        └── blacklist*.json      # CAN ID filters
+├── src/main.cpp                # Main application loop
+├── include/config.h            # Configuration & feature toggles
+├── lib/CarControl/             # Vehicle state management & CAN parsing
+├── lib/ClimateControl/         # Climate system state & control
+├── lib/CANBus/                 # MCP2515 CAN interface driver
+├── lib/WebServer/              # WiFi AP + web dashboard
+├── CAN_IDs.md                  # **CAN protocol documentation**
+└── client/                     # Python CAN debugging tools
+    ├── can_reader.py           # CAN frame reader/logger
+    ├── can_sender.py           # CAN frame sender
+    ├── nibble_monitor.py       # Nibble-level CAN analyzer
+    └── blacklist*.json         # CAN ID filters
 ```
 
 ## Key Documentation
@@ -45,14 +47,28 @@ carControl->update();  // Call every loop for timing
 carControl->onCanFrameReceived(frame);  // Pass CAN frames
 ```
 
-#### 2. CANBus (lib/CANBus/)
+#### 2. ClimateControl (lib/ClimateControl/)
+**Singleton class managing climate state**
+- Parses climate-related CAN frames (fan, temperature, AC)
+- Provides control methods for climate functions (seat heater, etc.)
+- Same architecture pattern as CarControl
+
+#### 3. WebServer (lib/WebServer/)
+**WiFi AP + web dashboard** (optional, toggle with `ENABLE_WEBSERVER` in config.h)
+- Creates WiFi access point "CANDebugger"
+- Serves web dashboard at http://192.168.4.1
+- Auto-refreshing display of all vehicle data
+- Minimal main.cpp integration: just `webServer->init()` and `update()`
+
+#### 4. CANBus (lib/CANBus/)
 **MCP2515 driver wrapper**
 - Hardware abstraction for CAN operations
 - Provides `read()`, `write()`, `init()` methods
 
-#### 3. Main Loop (src/main.cpp)
-- Reads CAN frames → passes to CarControl
+#### 5. Main Loop (src/main.cpp)
+- Reads CAN frames → passes to CarControl & ClimateControl
 - Prints vehicle status to serial (toggleable DEBUG_MODE)
+- Updates web server (if enabled)
 - Accepts serial commands for manual CAN frame injection
 
 ## Important Implementation Notes
@@ -116,6 +132,7 @@ carControl->onCanFrameReceived(frame);  // Pass CAN frames
 - **Keep plans short** - bullet points, not essays
 
 ### Testing
+- **PlatformIO path:** `C:\Users\giant\.platformio\penv\Scripts\platformio.exe`
 - Compile: `platformio run`
 - Upload: `platformio upload`
 - Monitor: `platformio device monitor` (115200 baud)
@@ -124,9 +141,12 @@ carControl->onCanFrameReceived(frame);  // Pass CAN frames
 ## Quick Reference
 
 ### Current Implementations
+
+**CarControl:**
 - ✅ Engine RPM (0x0AA bytes 4-5)
 - ✅ Throttle position (0x0AA bytes 2-3, scaled 0-255)
 - ✅ Braking status (0x0A8)
+- ✅ Steering wheel angle (0x0C8 bytes 0-1)
 - ✅ Door locks/open status (0x0E2, 0x0E6, 0x1E1)
 - ✅ Mirrors retracted (0x0F6)
 - ✅ Parking brake (0x1B4)
@@ -135,10 +155,25 @@ carControl->onCanFrameReceived(frame);  // Pass CAN frames
 - ✅ Window positions (0x3B6-0x3B9)
 - ✅ Window control (0x0FA)
 - ✅ Dome light control (0x1E3)
-- ✅ Seat heater control (0x1E7)
 
-### Debug Mode Toggle
-Comment/uncomment `#define DEBUG_MODE` in `src/main.cpp` line 10
+**ClimateControl:**
+- ✅ Fan speed (0x2E6 byte 5)
+- ✅ Driver temperature (0x2E6 byte 7)
+- ✅ Passenger temperature (0x2EA byte 7)
+- ✅ AC compressor status (0x242 byte 0 bit 0)
+- ✅ Driver seat heater control (0x1E7)
+
+### Feature Toggles
+Edit `include/config.h`:
+- `#define DEBUG_MODE` - Enable raw CAN frame output (comment out for formatted status)
+- `#define ENABLE_WEBSERVER` - Enable WiFi AP + web dashboard (comment out to disable)
+
+### Web Dashboard
+When `ENABLE_WEBSERVER` is enabled:
+1. ESP8266 creates WiFi AP: **CANDebugger** (password: candebugger123)
+2. Connect to WiFi network
+3. Open browser to **http://192.168.4.1**
+4. View real-time vehicle data (updates every 500ms)
 
 ---
 

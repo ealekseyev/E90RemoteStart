@@ -88,7 +88,35 @@ if (throttle == 0) {
 | Byte | Description | Calculation |
 |------|-------------|-------------|
 | 0-1 | Battery voltage | `raw = (byte1 << 8) \| byte0`<br>`voltage = (raw - 0xF000) / 68.0` |
-| 2 | Engine status | `0x00` = running<br>`0x09` = not running |
+| 2 | Engine flag | `0x00` = on<br>`0x09` = not running |
+
+**Ignition Status Logic:**
+The ignition status combines the engine flag from 0x3B4 with RPM from 0x0AA:
+
+- **OFF**: Engine flag is off (byte 2 != 0x00)
+- **SECOND**: Engine flag on (byte 2 == 0x00) but RPM < 400
+- **RUNNING**: Engine flag on AND RPM >= 400
+
+**Engine Running:**
+Returns true only when ignition is RUNNING (flag on + RPM > 400).
+
+**Usage:**
+```cpp
+bool running = carControl->isEngineRunning();  // true only if RPM > 400
+IgnitionStatus ignition = carControl->getIgnitionStatus();
+
+switch (ignition) {
+    case IGNITION_OFF:
+        // Ignition off
+        break;
+    case IGNITION_SECOND:
+        // Ignition in position 2, engine cranking or idling < 400 RPM
+        break;
+    case IGNITION_RUNNING:
+        // Engine fully running
+        break;
+}
+```
 
 ## Window Control (WRITE)
 
@@ -129,3 +157,104 @@ uint8_t pos = carControl->getWindowPosition(DRIVER_FRONT);
 ```
 
 **Note:** Window positions are automatically scaled from the CAN bus range (0x00-0x50) to 0-255 for easier use.
+
+## Climate Control (READ-ONLY)
+
+### 0x2E6 - Fan Speed and Driver Temperature
+**Access:** Read-only
+**Update Rate:** ~100ms
+**DLC:** 8 bytes
+
+| Byte | Bits | Description | Values |
+|------|------|-------------|--------|
+| 0-4  | -    | Unknown | - |
+| 5    | 0-2  | Fan speed | 0-7 (0=off, 7=max) |
+| 6    | -    | Unknown | - |
+| 7    | -    | Driver temp | 0x20-0x38 (17-28°C) |
+
+**Temperature Conversion:**
+```cpp
+// Raw range: 0x20-0x38 (24 steps)
+// Temperature range: 17-28°C (11 degrees)
+celsius = 17 + ((rawValue - 0x20) * 11) / 24
+```
+
+**Usage:**
+```cpp
+uint8_t fanSpeed = climateControl->getFanSpeed();  // 0-7
+int8_t driverTemp = climateControl->getDriverTemp();  // 17-28°C
+```
+
+**Examples:**
+- `2e6:00 64 00 00 00 01 3F 20` - Fan speed 1, driver temp 17°C
+- `2e6:00 64 00 00 00 07 3F 38` - Fan speed 7, driver temp 28°C
+
+### 0x2EA - Passenger Temperature
+**Access:** Read-only
+**Update Rate:** ~100ms
+**DLC:** 8 bytes
+
+| Byte | Bits | Description | Values |
+|------|------|-------------|--------|
+| 0-6  | -    | Unknown | Usually 0xFF |
+| 7    | -    | Passenger temp | 0x20-0x38 (17-28°C) |
+
+**Temperature Conversion:**
+```cpp
+// Raw range: 0x20-0x38 (24 steps)
+// Temperature range: 17-28°C (11 degrees)
+celsius = 17 + ((rawValue - 0x20) * 11) / 24
+```
+
+**Usage:**
+```cpp
+int8_t passengerTemp = climateControl->getPassengerTemp();  // 17-28°C
+```
+
+**Examples:**
+- `2ea:FF FF FF FF FF FF FF 20` - Passenger temp 17°C
+- `2ea:FF FF FF FF FF FF FF 38` - Passenger temp 28°C
+
+### 0x242 - AC Compressor Status
+**Access:** Read-only
+**Update Rate:** ~500ms
+**DLC:** Variable
+
+| Byte | Bits | Description | Values |
+|------|------|-------------|--------|
+| 0    | 0    | AC active | 0=off, 1=on |
+| 0    | 1-7  | Other flags | - |
+| 1-4  | -    | Unknown | - |
+
+**Usage:**
+```cpp
+bool acOn = climateControl->isACActive();  // true if compressor running
+```
+
+**Examples:**
+- `242:10 F1 FC FF FF` - AC off (bit 0 = 0)
+- `242:11 F1 FC FF FF` - AC on (bit 0 = 1)
+
+### 0x1E7 - Driver Seat Heater Control
+**Access:** Write
+**Update Rate:** Command (timed sequence)
+**DLC:** 1 byte
+
+| Byte | Description | Values |
+|------|-------------|--------|
+| 0    | Heater command | 0xD0 = Heat ON (press)<br>0xC0 = Heat OFF or release |
+
+**Control Pattern:**
+1. Send press frame (0xD0 for on, 0xC0 for off)
+2. Wait BUTTON_PRESS_DURATION_MS (typically 100ms)
+3. Send release frame (0xC0)
+
+**Usage:**
+```cpp
+climateControl->setDriverSeatHeater(true);   // Turn on
+climateControl->setDriverSeatHeater(false);  // Turn off
+```
+
+**Examples:**
+- `1e7:d0` - Press "heat on" button
+- `1e7:c0` - Release button / heat off

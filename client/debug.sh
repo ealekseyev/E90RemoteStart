@@ -1,0 +1,1 @@
+py -3.12 C:\Users\giant\Documents\github\CANDebugger\can_reader.py COM3 --log $1.log --blacklist .\blacklist_new.json
