@@ -75,12 +75,23 @@ void VehicleWebServer::handleRoot() {
         "<script>"
         "function updateData() {"
         "  fetch('/data').then(r => r.json()).then(data => {"
+        "    document.getElementById('speed').textContent = data.speed + ' MPH';"
         "    document.getElementById('engineRPM').textContent = data.engineRPM + ' RPM';"
+        "    document.getElementById('engineTemp').textContent = data.engineTemp + ' °C';"
+        "    document.getElementById('torque').textContent = data.torque + ' Nm';"
+        "    document.getElementById('power').textContent = data.power + ' KW';"
         "    document.getElementById('throttle').textContent = data.throttle;"
         "    document.getElementById('steering').textContent = data.steering + '°';"
         "    document.getElementById('battery').textContent = data.battery + 'V';"
+        "    document.getElementById('odometer').textContent = data.odometer + ' KM';"
+        "    document.getElementById('fuelLevel').textContent = data.fuelLevel + ' L';"
+        "    document.getElementById('range').textContent = data.range + ' KM';"
         "    document.getElementById('engineRunning').textContent = data.engineRunning;"
-        "    document.getElementById('engineRunning').className = 'value status-' + (data.engineRunning === 'RUNNING' ? 'on' : 'off');"
+        "    document.getElementById('engineRunning').className = 'value status-' + (data.engineRunning === 'Running' ? 'on' : 'off');"
+        "    document.getElementById('keyStatus').textContent = data.keyStatus;"
+        "    document.getElementById('crankingStatus').textContent = data.crankingStatus;"
+        "    document.getElementById('crankingStatus').className = 'value status-' + (data.crankingStatus === 'Cranking' ? 'on' : 'off');"
+        "    document.getElementById('gearPosition').textContent = data.gearPosition;"
         "    document.getElementById('braking').textContent = data.braking;"
         "    document.getElementById('braking').className = 'value status-' + (parseInt(data.braking) > 0 ? 'on' : 'off');"
         "    document.getElementById('parkingBrake').textContent = data.parkingBrake;"
@@ -94,6 +105,8 @@ void VehicleWebServer::handleRoot() {
         "    document.getElementById('passengerTemp').textContent = data.passengerTemp + '°C';"
         "    document.getElementById('acActive').textContent = data.acActive;"
         "    document.getElementById('acActive').className = 'value status-' + (data.acActive === 'ON' ? 'on' : 'off');"
+        "    document.getElementById('driverSeatHeater').textContent = data.driverSeatHeater;"
+        "    document.getElementById('passengerSeatHeater').textContent = data.passengerSeatHeater;"
         "    document.getElementById('windowDF').textContent = data.windowDF + '%';"
         "    document.getElementById('windowPF').textContent = data.windowPF + '%';"
         "    document.getElementById('windowDR').textContent = data.windowDR + '%';"
@@ -110,9 +123,23 @@ void VehicleWebServer::handleRoot() {
         "<div class='section'>"
         "<h2>Engine & Powertrain</h2>"
         "<div class='data-row'><span class='label'>Engine Status:</span><span id='engineRunning' class='value'>-</span></div>"
+        "<div class='data-row'><span class='label'>Key Status:</span><span id='keyStatus' class='value'>-</span></div>"
+        "<div class='data-row'><span class='label'>Cranking Status:</span><span id='crankingStatus' class='value'>-</span></div>"
+        "<div class='data-row'><span class='label'>Gear Position:</span><span id='gearPosition' class='value'>-</span></div>"
+        "<div class='data-row'><span class='label'>Speed:</span><span id='speed' class='value'>-</span></div>"
         "<div class='data-row'><span class='label'>RPM:</span><span id='engineRPM' class='value'>-</span></div>"
+        "<div class='data-row'><span class='label'>Engine Temp:</span><span id='engineTemp' class='value'>-</span></div>"
+        "<div class='data-row'><span class='label'>Torque:</span><span id='torque' class='value'>-</span></div>"
+        "<div class='data-row'><span class='label'>Power:</span><span id='power' class='value'>-</span></div>"
         "<div class='data-row'><span class='label'>Throttle:</span><span id='throttle' class='value'>-</span></div>"
         "<div class='data-row'><span class='label'>Battery:</span><span id='battery' class='value'>-</span></div>"
+        "</div>"
+
+        "<div class='section'>"
+        "<h2>Fuel & Range</h2>"
+        "<div class='data-row'><span class='label'>Odometer:</span><span id='odometer' class='value'>-</span></div>"
+        "<div class='data-row'><span class='label'>Fuel Level:</span><span id='fuelLevel' class='value'>-</span></div>"
+        "<div class='data-row'><span class='label'>Range:</span><span id='range' class='value'>-</span></div>"
         "</div>"
 
         "<div class='section'>"
@@ -131,6 +158,8 @@ void VehicleWebServer::handleRoot() {
         "<div class='data-row'><span class='label'>Driver Temp:</span><span id='driverTemp' class='value'>-</span></div>"
         "<div class='data-row'><span class='label'>Passenger Temp:</span><span id='passengerTemp' class='value'>-</span></div>"
         "<div class='data-row'><span class='label'>AC Active:</span><span id='acActive' class='value'>-</span></div>"
+        "<div class='data-row'><span class='label'>Driver Seat Heater:</span><span id='driverSeatHeater' class='value'>-</span></div>"
+        "<div class='data-row'><span class='label'>Passenger Seat Heater:</span><span id='passengerSeatHeater' class='value'>-</span></div>"
         "</div>"
 
         "<div class='section'>"
@@ -158,7 +187,16 @@ void VehicleWebServer::handleData() {
     String json = "{";
 
     // Engine & Powertrain
+    json += "\"speed\":" + String(g_carControl->getSpeed(), 1) + ",";
     json += "\"engineRPM\":" + String(g_carControl->getEngineRPM()) + ",";
+    json += "\"engineTemp\":" + String(g_carControl->getEngineTemp()) + ",";
+    json += "\"torque\":" + String(g_carControl->getTorque(), 1) + ",";
+    json += "\"power\":" + String(g_carControl->getPower(), 1) + ",";
+
+    // Fuel & Range
+    json += "\"odometer\":" + String(g_carControl->getOdometer()) + ",";
+    json += "\"fuelLevel\":" + String(g_carControl->getFuelLevel()) + ",";
+    json += "\"range\":" + String(g_carControl->getRange(), 1) + ",";
 
     uint8_t throttle = g_carControl->getThrottlePosition();
     if (throttle == 255) {
@@ -171,11 +209,37 @@ void VehicleWebServer::handleData() {
     json += "\"steering\":" + String(g_carControl->getSteeringWheelAngle(), 1) + ",";
     json += "\"battery\":" + String(g_carControl->getBatteryVoltage(), 2) + ",";
 
-    IgnitionStatus ignition = g_carControl->getIgnitionStatus();
-    const char* ignitionStr = (ignition == IGNITION_OFF) ? "OFF" :
-                             (ignition == IGNITION_SECOND) ? "SECOND" : "RUNNING";
-    json += "\"engineRunning\":\"" + String(ignitionStr) + "\",";
+    // Engine running status (simplified)
+    json += "\"engineRunning\":\"" + String(g_carControl->isEngineRunning() ? "Running" : "Off") + "\",";
 
+    // Key state
+    KeyState keyState = g_carControl->getKeyState();
+    const char* keyStateStr;
+    switch (keyState) {
+        case KEY_ENGINE_OFF:  keyStateStr = "Engine Off"; break;
+        case KEY_INSERTING:   keyStateStr = "Inserting"; break;
+        case KEY_POSITION_1:  keyStateStr = "Position 1"; break;
+        case KEY_POSITION_2:  keyStateStr = "Position 2"; break;
+        case KEY_CRANKING:    keyStateStr = "Cranking"; break;
+        default:              keyStateStr = "Unknown"; break;
+    }
+    json += "\"keyStatus\":\"" + String(keyStateStr) + "\",";
+
+    // Cranking status
+    json += "\"crankingStatus\":\"" + String(g_carControl->isEngineCranking() ? "Cranking" : "Not Cranking") + "\",";
+
+    // Gear position
+    GearPosition gear = g_carControl->getGearPosition();
+    const char* gearStr;
+    switch (gear) {
+        case GEAR_PARK:        gearStr = "Park"; break;
+        case GEAR_REVERSE:     gearStr = "Reverse"; break;
+        case GEAR_NEUTRAL:     gearStr = "Neutral"; break;
+        case GEAR_DRIVE:       gearStr = "Drive"; break;
+        case GEAR_DRIVE_SPORT: gearStr = "Drive Sport"; break;
+        default:               gearStr = "Unknown"; break;
+    }
+    json += "\"gearPosition\":\"" + String(gearStr) + "\",";
 
     // Vehicle Status
     uint8_t brakePercent = (g_carControl->getBrakeStatus() * 100) / 255;
@@ -217,6 +281,14 @@ void VehicleWebServer::handleData() {
         }
     }
     json += "\"blowerState\":\"" + blowerStr + "\",";
+
+    // Seat heaters
+    uint8_t driverHeater = g_climateControl->getDriverSeatHeaterLevel();
+    uint8_t passengerHeater = g_climateControl->getPassengerSeatHeaterLevel();
+
+    const char* heaterLevels[] = {"Off", "Low", "Medium", "High"};
+    json += "\"driverSeatHeater\":\"" + String(heaterLevels[driverHeater]) + "\",";
+    json += "\"passengerSeatHeater\":\"" + String(heaterLevels[passengerHeater]) + "\",";
 
     // Windows (as percentage)
     uint8_t wdf = (g_carControl->getWindowPosition(DRIVER_FRONT) * 100) / 255;

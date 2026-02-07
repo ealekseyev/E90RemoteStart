@@ -43,6 +43,64 @@ if (throttle == 0) {
 | 65064 | != 0xB4 | 254 | Foot flat (no kickdown) |
 | Any | 0xB4 | 255 | Kickdown pressed |
 
+### 0x130 - Key Position State
+**Access:** Read-only
+**Update Rate:** ~100ms
+
+| Byte | Description | Values |
+|------|-------------|--------|
+| 0 | Key position | 0x00 = Engine off (key removed)<br>0x40 = Key being inserted<br>0x41 = Key position 1 (accessories)<br>0x45 = Key position 2 (engine running)<br>0x55 = Engine cranking/auto start-stop |
+
+**Implementation Notes:**
+- Engine running detection combines key state + RPM > 400
+- Falls back to 0x3B4 on vehicles without 0x130
+- Cranking state (0x55) detected explicitly via `isEngineCranking()`
+
+**Usage:**
+```cpp
+KeyState keyState = carControl->getKeyState();
+bool running = carControl->isEngineRunning();       // true when key=pos2/cranking AND RPM>400
+bool cranking = carControl->isEngineCranking();     // true when key=cranking AND RPM<400
+IgnitionStatus status = carControl->getIgnitionStatus();
+```
+
+### 0x304 - Gear Position
+**Access:** Read-only
+**Update Rate:** ~100ms
+
+| Byte | Description | Values |
+|------|-------------|--------|
+| 0 | Gear position | 0xE3 = Park (P)<br>0xC2 = Reverse (R)<br>0xD1 = Neutral (N)<br>0xC7 = Drive (D) |
+
+**Usage:**
+```cpp
+GearPosition gear = carControl->getGearPosition();
+
+switch (gear) {
+    case GEAR_PARK:
+        // Vehicle in park
+        break;
+    case GEAR_REVERSE:
+        // Vehicle in reverse
+        break;
+    case GEAR_NEUTRAL:
+        // Vehicle in neutral
+        break;
+    case GEAR_DRIVE:
+        // Vehicle in drive
+        break;
+    case GEAR_UNKNOWN:
+        // Unknown gear position
+        break;
+}
+```
+
+**Examples:**
+- `304:E3 FF ...` - Park
+- `304:C2 FF ...` - Reverse
+- `304:D1 FF ...` - Neutral
+- `304:C7 FF ...` - Drive
+
 ## Window Position Status (READ-ONLY)
 
 ### 0x3B6 - Driver Front Window
@@ -242,19 +300,57 @@ bool acOn = climateControl->isACActive();  // true if compressor running
 
 | Byte | Description | Values |
 |------|-------------|--------|
-| 0    | Heater command | 0xD0 = Heat ON (press)<br>0xC0 = Heat OFF or release |
+| 0    | Heater command | 0xD0 = Button press<br>0xC0 = Button release |
 
 **Control Pattern:**
-1. Send press frame (0xD0 for on, 0xC0 for off)
-2. Wait BUTTON_PRESS_DURATION_MS (typically 100ms)
+The seat heater cycles through levels: OFF → LOW → MEDIUM → HIGH → OFF
+Each button press advances to the next level.
+
+Multi-click control sequence (automatic):
+1. Send press frame (0xD0)
+2. Wait for level change on CAN 0x232 (or timeout 200ms)
 3. Send release frame (0xC0)
+4. Pause 100ms
+5. Repeat until target level reached
 
 **Usage:**
 ```cpp
-climateControl->setDriverSeatHeater(true);   // Turn on
-climateControl->setDriverSeatHeater(false);  // Turn off
+climateControl->setDriverSeatHeater(0);  // Off
+climateControl->setDriverSeatHeater(1);  // Low (1 click from off)
+climateControl->setDriverSeatHeater(2);  // Medium (2 clicks from off)
+climateControl->setDriverSeatHeater(3);  // High (3 clicks from off)
+```
+
+Function automatically calculates shortest path (e.g., HIGH→LOW = 2 clicks forward).
+
+**Examples:**
+- `1e7:d0` - Press button
+- `1e7:c0` - Release button
+
+### 0x232 - Seat Heater Status
+**Access:** Read-only
+**Update Rate:** ~100ms
+**DLC:** 3 bytes
+
+| Byte | Bits | Description | Values |
+|------|------|-------------|--------|
+| 0    | 4-7  | Driver heater level | 0=off, 1=low, 2=medium, 3=high |
+| 0    | 0-3  | Passenger heater level | 0=off, 1=low, 2=medium, 3=high |
+| 1-2  | -    | Fixed | 0x40 0xF0 |
+
+**Nibble Encoding:**
+- **Left nibble** (upper 4 bits): Driver side
+- **Right nibble** (lower 4 bits): Passenger side
+
+**Usage:**
+```cpp
+uint8_t driverLevel = climateControl->getDriverSeatHeaterLevel();    // 0-3
+uint8_t passengerLevel = climateControl->getPassengerSeatHeaterLevel(); // 0-3
 ```
 
 **Examples:**
-- `1e7:d0` - Press "heat on" button
-- `1e7:c0` - Release button / heat off
+- `232:00 40 F0` - Both heaters off
+- `232:10 40 F0` - Driver low, passenger off
+- `232:21 40 F0` - Driver medium, passenger low
+- `232:32 40 F0` - Driver high, passenger medium
+- `232:33 40 F0` - Both heaters on high

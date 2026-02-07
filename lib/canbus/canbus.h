@@ -15,11 +15,17 @@ public:
     CANBus(uint8_t csPin);
 
     bool init(uint32_t bitrate);
+    bool initInterrupt(uint32_t bitrate, uint8_t intPin);
     bool write(const CANFrame& frame);
     bool read(CANFrame& frame);
+    void setControlObjects(void* car, void* climate);
+
+    void handleInterrupt();  // Called by ISR
 
 private:
     MCP2515 mcp;
+    uint8_t interruptPin;
+    bool interruptEnabled;
 };
 
 #endif

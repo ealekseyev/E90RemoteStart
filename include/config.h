@@ -20,7 +20,7 @@
 #define WIFI_AP_CHANNEL 6
 
 // Non-blocking CAN operation timings
-#define BUTTON_PRESS_DURATION_MS 150   // Button press/release delay
+#define BUTTON_PRESS_DURATION_MS 200   // Button press/release delay
 #define WINDOW_FRAME_INTERVAL_MS 200   // Window frame repeat interval
 #define WINDOW_DURATION_MS 3000        // Window operation total duration
 

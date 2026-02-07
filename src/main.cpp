@@ -5,6 +5,7 @@
 #include "CarControl.hpp"
 #include "ClimateControl.hpp"
 #include "CustomKeys.h"
+#include "Logger.hpp"
 #ifdef ENABLE_WEBSERVER
 #include "WebServer.hpp"
 #endif
@@ -18,6 +19,11 @@ VehicleWebServer* webServer = VehicleWebServer::getInstance();
 #endif
 
 String serialBuffer = "";
+
+// RPM sweep state tracking (gauge cluster only)
+static bool wasCranking = false;
+static unsigned long lastSweepTime = 0;
+static const unsigned long SWEEP_COOLDOWN = 5000;  // 5 seconds
 
 uint8_t hexCharToNibble(char c) {
     if (c >= '0' && c <= '9') return c - '0';
@@ -61,11 +67,15 @@ void setup() {
     Serial.begin(SERIAL_BAUD_RATE);
     while (!Serial);
 
-    can.init(CAN_BITRATE);
+    can.initInterrupt(CAN_BITRATE, MCP2515_INT_PIN);
     carControl->init(&can);
     climateControl->init(&can);
     customKeys->init(carControl);
-    Serial.println("CAN Ready");
+
+    // Register control objects with CANBus for ISR access
+    can.setControlObjects(carControl, climateControl);
+
+    Serial.println("CAN Ready (ISR-Direct Mode)");
 
 #ifdef ENABLE_WEBSERVER
     webServer->init(carControl, climateControl);
@@ -81,61 +91,24 @@ void loop() {
     webServer->update();
 #endif
 
-    CANFrame frame;
-    if (can.read(frame)) {
-        // Pass to CarControl for state tracking
-        carControl->onCanFrameReceived(frame);
-        climateControl->onCanFrameReceived(frame);
+    // RPM sweep for gauge cluster (after cranking finishes)
+    bool isCranking = carControl->isEngineCranking();
 
-        // Print frame for debugging
-#ifdef DEBUG_MODE
-        Serial.print("RX: 0x");
-        if (frame.id < 0x100) Serial.print("0");
-        if (frame.id < 0x10) Serial.print("0");
-        Serial.print(frame.id, HEX);
-        Serial.print(" Data:");
-
-        for (uint8_t i = 0; i < frame.dlc; i++) {
-            Serial.print(" ");
-            if (frame.data[i] < 0x10) Serial.print("0");
-            Serial.print(frame.data[i], HEX);
+    if (!isCranking && wasCranking) {
+        if (millis() - lastSweepTime >= SWEEP_COOLDOWN) {
+            unsigned long start = millis();
+            while (millis() - start < 800) {
+                carControl->sendFakeRPM(7000);
+                delay(2);
+            }
+            lastSweepTime = millis();
         }
-        Serial.println();
-#else
-        Serial.printf("Engine ");
-        IgnitionStatus ignition = carControl->getIgnitionStatus();
-        switch (ignition) {
-            case IGNITION_OFF:
-                Serial.printf("OFF");
-                break;
-            case IGNITION_SECOND:
-                Serial.printf("SECOND");
-                break;
-            case IGNITION_RUNNING:
-                Serial.printf("RUNNING");
-                break;
-        }
-        Serial.printf(", Battery: %0.2fV", carControl->getBatteryVoltage());
-        Serial.printf(", RPM: %u", carControl->getEngineRPM());
-
-        uint8_t throttle = carControl->getThrottlePosition();
-        if (throttle == 255) {
-            Serial.printf(", Throttle: KICKDOWN");
-        } else {
-            uint8_t percent = (throttle * 100) / 254;
-            Serial.printf(", Throttle: %u%%", percent);
-        }
-
-        Serial.printf(", Steering: %.1f°", carControl->getSteeringWheelAngle());
-
-        Serial.printf(", Climate - Fan: %u", climateControl->getFanSpeed());
-        Serial.printf(" | Driver: %dC", climateControl->getDriverTemp());
-        Serial.printf(" | Passenger: %dC", climateControl->getPassengerTemp());
-        Serial.printf(" | AC: %s", climateControl->isACActive() ? "ON" : "OFF");
-        Serial.println();
-#endif
-
     }
+
+    wasCranking = isCranking;
+
+    // Process deferred log entries (state already updated by ISR)
+    Logger::processNextLog(carControl, climateControl);
 
     while (Serial.available()) {
         char c = Serial.read();

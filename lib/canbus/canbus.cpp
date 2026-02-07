@@ -1,8 +1,24 @@
 #include "canbus.h"
+#include "CarControl.hpp"
+#include "ClimateControl.hpp"
+#include "Logger.hpp"
 #include "config.h"
 #include <SPI.h>
+#include <Arduino.h>
 
-CANBus::CANBus(uint8_t csPin) : mcp(csPin) {}
+// Global pointers for ISR access
+static CANBus* g_canBus = nullptr;
+static CarControl* g_carControl = nullptr;
+static ClimateControl* g_climateControl = nullptr;
+
+// ISR function
+void IRAM_ATTR canISR() {
+    if (g_canBus) {
+        g_canBus->handleInterrupt();
+    }
+}
+
+CANBus::CANBus(uint8_t csPin) : mcp(csPin), interruptPin(0), interruptEnabled(false) {}
 
 bool CANBus::init(uint32_t bitrate) {
     SPI.begin();
@@ -34,6 +50,22 @@ bool CANBus::init(uint32_t bitrate) {
     return true;
 }
 
+bool CANBus::initInterrupt(uint32_t bitrate, uint8_t intPin) {
+    if (!init(bitrate)) {
+        return false;
+    }
+
+    interruptPin = intPin;
+    interruptEnabled = true;
+    g_canBus = this;
+
+    // Configure interrupt pin
+    pinMode(interruptPin, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(interruptPin), canISR, FALLING);
+
+    return true;
+}
+
 bool CANBus::write(const CANFrame& frame) {
     struct can_frame txFrame;
     txFrame.can_id = frame.id;
@@ -55,4 +87,25 @@ bool CANBus::read(CANFrame& frame) {
         frame.data[i] = rxFrame.data[i];
     }
     return true;
+}
+
+void CANBus::setControlObjects(void* car, void* climate) {
+    g_carControl = (CarControl*)car;
+    g_climateControl = (ClimateControl*)climate;
+}
+
+void IRAM_ATTR CANBus::handleInterrupt() {
+    CANFrame frame;
+    if (read(frame)) {
+        // Update state immediately (ISR context)
+        if (g_carControl) {
+            g_carControl->onCanFrameReceived(frame);
+        }
+        if (g_climateControl) {
+            g_climateControl->onCanFrameReceived(frame);
+        }
+
+        // Buffer for deferred logging
+        Logger::bufferLogEntry(frame);
+    }
 }

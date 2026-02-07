@@ -2,6 +2,7 @@
 #define CUSTOMKEYS_H
 
 #include "CarControl.hpp"
+#include "ClimateControl.hpp"
 
 class CustomKeys {
 public:

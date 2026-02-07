@@ -4,6 +4,7 @@
 
 extern CANBus can;
 extern CarControl* carControl;
+extern ClimateControl* climateControl;
 
 CustomKeys* CustomKeys::instance = nullptr;
 
@@ -85,7 +86,26 @@ void CustomKeys::update() {
 }
 
 void CustomKeys::onSinglePress() {
-    carControl->playGong();
+    // static bool state = false;
+    // if(!state) {
+    //     climateControl->setDriverSeatHeater(3);
+    //     climateControl->setPassengerSeatHeater(3);
+    //     state = true;
+    // } else {
+    //     climateControl->setDriverSeatHeater(0);
+    //     climateControl->setPassengerSeatHeater(0);
+    //     state = false;
+    // }
+    static bool off = true;
+    if(off) {
+        carControl->toggleTractionControl(false);
+        climateControl->setDriverSeatHeater(3);
+        off = false;
+    } else {
+        carControl->toggleTractionControl(false);
+        climateControl->setDriverSeatHeater(0);
+        off = true;
+    }
 }
 
 void CustomKeys::onDoublePress() {
@@ -112,5 +132,5 @@ void CustomKeys::onDoublePress() {
 }
 
 void CustomKeys::onLongPress() {
-    // Empty for now - placeholder for future functionality
+    carControl->playGong();
 }

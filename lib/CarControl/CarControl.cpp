@@ -119,16 +119,21 @@ void print_8bit_binary(unsigned char num) {
 }
 
 bool CarControl::isSteeringButtonPressed(uint8_t mask) const {
-    uint8_t buttonStates = 0;
-    if(state.steeringButtonPressed & 0b0000100000000000) buttonStates |= STEERING_BTN_VOLUME_UP;
-    if(state.steeringButtonPressed & 0b0000010000000000) buttonStates |= STEERING_BTN_VOLUME_DOWN;
-    if(state.steeringButtonPressed & 0b0000000000000001) buttonStates |= STEERING_BTN_SIRI;
-    if(state.steeringButtonPressed & 0b0000000100000000) buttonStates |= STEERING_BTN_PHONE;
+    uint16_t steeringButtons;
+    CRITICAL_SECTION_START();
+    steeringButtons = state.steeringButtonPressed;
+    CRITICAL_SECTION_END();
 
-    if(state.steeringButtonPressed & 0b0000000001000000) buttonStates |= STEERING_BTN_CUSTOM;
-    if(state.steeringButtonPressed & 0b0000000000010000) buttonStates |= STEERING_BTN_CHANNEL;
-    if(state.steeringButtonPressed & 0b0010000000000000) buttonStates |= STEERING_BTN_PREV;
-    if(state.steeringButtonPressed & 0b0001000000000000) buttonStates |= STEERING_BTN_NEXT;
+    uint8_t buttonStates = 0;
+    if(steeringButtons & 0b0000100000000000) buttonStates |= STEERING_BTN_VOLUME_UP;
+    if(steeringButtons & 0b0000010000000000) buttonStates |= STEERING_BTN_VOLUME_DOWN;
+    if(steeringButtons & 0b0000000000000001) buttonStates |= STEERING_BTN_SIRI;
+    if(steeringButtons & 0b0000000100000000) buttonStates |= STEERING_BTN_PHONE;
+
+    if(steeringButtons & 0b0000000001000000) buttonStates |= STEERING_BTN_CUSTOM;
+    if(steeringButtons & 0b0000000000010000) buttonStates |= STEERING_BTN_CHANNEL;
+    if(steeringButtons & 0b0010000000000000) buttonStates |= STEERING_BTN_PREV;
+    if(steeringButtons & 0b0001000000000000) buttonStates |= STEERING_BTN_NEXT;
     return (buttonStates & mask) > 0;
 }
 
@@ -145,25 +150,89 @@ uint8_t CarControl::getDomeLightBrightness() const {
 }
 
 float CarControl::getBatteryVoltage() const {
-    return state.batteryVoltage;
+    float voltage;
+    CRITICAL_SECTION_START();
+    voltage = state.batteryVoltage;
+    CRITICAL_SECTION_END();
+    return voltage;
 }
 
 bool CarControl::isEngineRunning() const {
-    // Engine is running only when CAN flag is on AND RPM > 400
+    // Priority 1: Use key state if available
+    if (state.keyStateAvailable) {
+        KeyState keyState = getKeyState();
+        // Running: key in position 2 or cranking, WITH RPM confirmation
+        return ((keyState == KEY_POSITION_2 || keyState == KEY_CRANKING) &&
+                state.engineRPM > 400);
+    }
+
+    // Priority 2: Fallback to 0x3B4 for vehicles without 0x130
     return state.engineFlagFromCAN && (state.engineRPM > 400);
 }
 
+KeyState CarControl::getKeyState() const {
+    if (!state.keyStateAvailable) {
+        return KEY_ENGINE_OFF;  // Safe default when unavailable
+    }
+
+    switch (state.keyStateRaw) {
+        case 0x00: return KEY_ENGINE_OFF;
+        case 0x40: return KEY_INSERTING;
+        case 0x41: return KEY_POSITION_1;
+        case 0x45: return KEY_POSITION_2;
+        case 0x55: return KEY_CRANKING;
+        default:   return KEY_ENGINE_OFF;  // Unknown = off (fail-safe)
+    }
+}
+
+bool CarControl::isEngineCranking() const {
+    if (state.keyStateAvailable) {
+        KeyState keyState = getKeyState();
+        return (keyState == KEY_CRANKING && state.engineRPM < 400);
+    }
+
+    // Fallback heuristic for vehicles without 0x130
+    return state.engineFlagFromCAN &&
+           state.engineRPM > 0 &&
+           state.engineRPM < 400;
+}
+
+GearPosition CarControl::getGearPosition() const {
+    switch (state.gearPositionRaw) {
+        case 0xE3: return GEAR_PARK;
+        case 0xC2: return GEAR_REVERSE;
+        case 0xD1: return GEAR_NEUTRAL;
+        case 0xC7: return GEAR_DRIVE;
+        default:   return GEAR_UNKNOWN;
+    }
+}
+
 IgnitionStatus CarControl::getIgnitionStatus() const {
-    // If RPM > 400, engine is definitely running regardless of CAN flag
+    // Priority 1: RPM > 400 always means running (most reliable)
     if (state.engineRPM > 400) {
         return IGNITION_RUNNING;
     }
 
-    if (!state.engineFlagFromCAN) {
-        return IGNITION_OFF;  // Engine flag off -> ignition off
+    // Priority 2: Use key state if available
+    if (state.keyStateAvailable) {
+        KeyState keyState = getKeyState();
+
+        if (keyState == KEY_ENGINE_OFF ||
+            keyState == KEY_INSERTING ||
+            keyState == KEY_POSITION_1) {
+            return IGNITION_OFF;
+        }
+
+        // KEY_POSITION_2 or KEY_CRANKING with low RPM
+        return IGNITION_SECOND;
     }
 
-    return IGNITION_SECOND;  // Flag on, low RPM -> position 2
+    // Priority 3: Fallback to 0x3B4
+    if (!state.engineFlagFromCAN) {
+        return IGNITION_OFF;
+    }
+
+    return IGNITION_SECOND;
 }
 
 uint8_t CarControl::getWindowPosition(uint8_t window) const {
@@ -176,7 +245,11 @@ uint8_t CarControl::getWindowPosition(uint8_t window) const {
 }
 
 uint16_t CarControl::getEngineRPM() const {
-    return state.engineRPM;
+    uint16_t rpm;
+    CRITICAL_SECTION_START();
+    rpm = state.engineRPM;
+    CRITICAL_SECTION_END();
+    return rpm;
 }
 
 uint8_t CarControl::getThrottlePosition() const {
@@ -184,7 +257,58 @@ uint8_t CarControl::getThrottlePosition() const {
 }
 
 float CarControl::getSteeringWheelAngle() const {
-    return state.steeringWheelAngle;
+    float angle;
+    CRITICAL_SECTION_START();
+    angle = state.steeringWheelAngle;
+    CRITICAL_SECTION_END();
+    return angle;
+}
+
+float CarControl::getSpeed() const {
+    float speed;
+    CRITICAL_SECTION_START();
+    speed = state.speed;
+    CRITICAL_SECTION_END();
+    return speed;
+}
+
+int8_t CarControl::getEngineTemp() const {
+    return state.engineTemp;
+}
+
+uint32_t CarControl::getOdometer() const {
+    uint32_t odometer;
+    CRITICAL_SECTION_START();
+    odometer = state.odometer;
+    CRITICAL_SECTION_END();
+    return odometer;
+}
+
+float CarControl::getRange() const {
+    float range;
+    CRITICAL_SECTION_START();
+    range = state.range;
+    CRITICAL_SECTION_END();
+    return range;
+}
+
+uint8_t CarControl::getFuelLevel() const {
+    return state.fuelLevel;
+}
+
+float CarControl::getTorque() const {
+    if (!isEngineRunning()) return 0.0;
+    float torque;
+    CRITICAL_SECTION_START();
+    torque = state.torque;
+    CRITICAL_SECTION_END();
+    return torque;
+}
+
+float CarControl::getPower() const {
+    // Power (KW) = (RPM * Torque) / 9549.2965855
+    if (!isEngineRunning()) return 0.0;
+    return (state.engineRPM * state.torque) / 9549.2965855;
 }
 
 // ============ Writable Control Functions ============
@@ -255,6 +379,50 @@ bool CarControl::setDomeLight(bool on) {
     return true;
 }
 
+bool CarControl::toggleTractionControl(bool completelyOff) {
+    if (!canBus) return false;
+
+    // Send button press
+    uint8_t pressData[8] = {0xfd, 0xff};
+    sendCanFrame(0x316, pressData, 2);
+
+    // Wait
+    delay(completelyOff ? 1000:80);
+
+    // Send button release
+    uint8_t releaseData[8] = {0xfc, 0xff};
+    sendCanFrame(0x316, releaseData, 2);
+
+    return true;
+}
+
+bool CarControl::sendFakeRPM(uint16_t rpm) {
+    if (!canBus) return false;
+
+    // Encode RPM: rawRPM = rpm * 4
+    uint16_t rawRPM = rpm * 4;
+
+    // Build frame (8 bytes)
+    uint8_t data[8] = {0};
+
+    // Bytes 2-3: Throttle position (255 = idle)
+    data[2] = 0xFF;
+    data[3] = 0x00;
+
+    // Bytes 4-5: RPM (little-endian)
+    data[4] = rawRPM & 0xFF;        // Low byte
+    data[5] = (rawRPM >> 8) & 0xFF; // High byte
+
+    return sendCanFrame(0x0aa, data, 8);
+}
+
+bool CarControl::spoofReverseLights() {
+    if (!canBus) return false;
+
+    uint8_t data[2] = {0xFE, 0xFF};
+    return sendCanFrame(0x3b0, data, 2);
+}
+
 uint8_t min(uint8_t a, uint8_t b) {
     return a > b ? b:a;
 }
@@ -264,9 +432,14 @@ void CarControl::parseCanFrame(uint16_t id, const uint8_t* data, uint8_t len) {
     if (len == 0) return;
 
     switch(id) {
-        case 0x0a8:  // Braking
+        case 0x0a8:  // Braking, torque
             if (len > 1) {
                 state.braking = (getNibble(data[1], 1) == 6);
+            }
+            if (len > 2) {
+                // Torque: bytes 1-2 (signed 16-bit, divided by 32 for Nm)
+                int16_t rawTorque = (data[2] << 8) | data[1];
+                state.torque = rawTorque / 32.0;
             }
             break;
 
@@ -296,6 +469,21 @@ void CarControl::parseCanFrame(uint16_t id, const uint8_t* data, uint8_t len) {
                         state.throttlePosition = (uint8_t)(scaled > 254 ? 254 : scaled);
                     }
                 }
+            }
+            break;
+
+        case 0x130:  // Key state
+            if (len > 0) {
+                state.keyStateRaw = data[0];
+                state.keyStateAvailable = true;
+            }
+            break;
+
+        case 0x1a1:  // Speed
+            if (len > 3) {
+                // Bytes 2-3: little-endian speed (raw value / 100 = MPH)
+                uint16_t rawSpeed = (data[3] << 8) | data[2];
+                state.speed = rawSpeed / 100.0;
             }
             break;
 
@@ -329,6 +517,13 @@ void CarControl::parseCanFrame(uint16_t id, const uint8_t* data, uint8_t len) {
         case 0x1b4:  // Parking brake
             if (len > 5) {
                 state.parkingBrakeOn = (data[5] == 0x32);
+            }
+            break;
+
+        case 0x1d0:  // Engine temperature
+            if (len > 0) {
+                // Byte 0: Coolant temperature (raw - 48 = °C)
+                state.engineTemp = data[0] - 48;
             }
             break;
 
@@ -375,6 +570,28 @@ void CarControl::parseCanFrame(uint16_t id, const uint8_t* data, uint8_t len) {
                 state.doorOpenPassengerFront = getBit(data[1], 2);   // Bit 2 (0x04)
                 state.doorOpenDriverRear = getBit(data[1], 4);       // Bit 4 (0x10)
                 state.doorOpenPassengerRear = getBit(data[1], 6);    // Bit 6 (0x40)
+            }
+            break;
+
+        case 0x304:  // Gear position
+            if (len > 0) {
+                state.gearPositionRaw = data[0];
+            }
+            break;
+
+        case 0x330:  // Odometer, fuel, range
+            if (len > 2) {
+                // Odometer: bytes 0-2 (little-endian, KM)
+                state.odometer = ((uint32_t)data[2] << 16) | ((uint32_t)data[1] << 8) | data[0];
+            }
+            if (len > 3) {
+                // Fuel level: byte 3 (litres)
+                state.fuelLevel = data[3];
+            }
+            if (len > 7) {
+                // Range: bytes 6-7 (big-endian, divide by 16 for KM)
+                uint16_t rawRange = (data[7] << 8) | data[6];
+                state.range = rawRange / 16.0;
             }
             break;
 

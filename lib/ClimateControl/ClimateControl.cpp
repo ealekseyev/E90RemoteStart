@@ -4,43 +4,6 @@
 // Static instance
 ClimateControl* ClimateControl::instance = nullptr;
 
-// Minimal command struct for communication with helpers
-static struct { bool on; bool pending; } seatHeaterCommand = {false, false};
-
-// ============ Update Helper Functions (self-contained with static state) ============
-
-static bool updateSeatHeaterControl(ClimateControl* ctrl) {
-    // All state is static inside this function
-    static unsigned long pressTime = 0;
-    static bool active = false;
-
-    // Handle new command
-    if (seatHeaterCommand.pending) {
-        seatHeaterCommand.pending = false;
-        active = true;
-        pressTime = millis();
-
-        // Send press frame
-        uint8_t pressData[8] = {0};
-        pressData[0] = seatHeaterCommand.on ? 0xd0 : 0xc0;
-        ctrl->sendCanFrame(0x1e7, pressData, 1);
-    }
-
-    if (!active) return false;
-
-    unsigned long currentTime = millis();
-
-    // Check if it's time to send release frame
-    if (currentTime - pressTime >= BUTTON_PRESS_DURATION_MS) {
-        uint8_t releaseData[8] = {0xc0};
-        ctrl->sendCanFrame(0x1e7, releaseData, 1);
-        active = false;
-        return false;  // Done
-    }
-
-    return true;  // Continue
-}
-
 ClimateControl::ClimateControl() : canBus(nullptr) {
     // Zero-initialize state
     state.fanSpeed = 0;
@@ -49,6 +12,8 @@ ClimateControl::ClimateControl() : canBus(nullptr) {
     state.passengerTemp = 0;
     state.acActive = false;
     state.blowerState = BLOWER_AUTO;
+    state.driverSeatHeater = 0;
+    state.passengerSeatHeater = 0;
 }
 
 ClimateControl* ClimateControl::getInstance() {
@@ -109,10 +74,10 @@ void ClimateControl::parseCanFrame(uint16_t id, const uint8_t* data, uint8_t len
             // Byte 7: Driver temperature (0x20 = 16°C, 0x38 = 28°C)
             if (len > 7) {
                 // Raw range: 0x20-0x38 (24 steps)
-                // Temp range: 16-28°C (11 degrees)
+                // Temp range: 16-28°C (12 degrees)
                 uint8_t rawTemp = data[7];
                 if (rawTemp >= 0x20 && rawTemp <= 0x38) {
-                    state.driverTemp = 16 + ((rawTemp - 0x20) * 11) / 24;
+                    state.driverTemp = 16 + ((rawTemp - 0x20) * 12) / 24;
                 }
             }
             break;
@@ -121,10 +86,10 @@ void ClimateControl::parseCanFrame(uint16_t id, const uint8_t* data, uint8_t len
             // Byte 7: Passenger temperature (same formula as driver)
             if (len > 7) {
                 // Raw range: 0x20-0x38 (24 steps)
-                // Temp range: 16-28°C (11 degrees)
+                // Temp range: 16-28°C (12 degrees)
                 uint8_t rawTemp = data[7];
                 if (rawTemp >= 0x20 && rawTemp <= 0x38) {
-                    state.passengerTemp = 16 + ((rawTemp - 0x20) * 11) / 24;
+                    state.passengerTemp = 16 + ((rawTemp - 0x20) * 12) / 24;
                 }
             }
             break;
@@ -137,6 +102,20 @@ void ClimateControl::parseCanFrame(uint16_t id, const uint8_t* data, uint8_t len
             // Byte 2, bit 0: Fan on/off (0xF0=off, 0xF1=on)
             if (len > 2) {
                 state.fanOn = getBit(data[2], 0);
+            }
+            break;
+
+        case 0x232:  // Driver seat heater status
+            // Byte 0, nibble 0: Driver seat heater level (0=off, 1=low, 2=medium, 3=high)
+            if (len > 0) {
+                state.driverSeatHeater = (data[0] & 0xF0) >> 4;  // Lower nibble
+            }
+            break;
+
+        case 0x22a:  // Passenger seat heater status
+            // Byte 0, nibble 1: Passenger seat heater level (0=off, 1=low, 2=medium, 3=high)
+            if (len > 0) {
+                state.passengerSeatHeater = (data[0] & 0xF0) >> 4;  // Upper nibble
             }
             break;
     }
@@ -168,31 +147,85 @@ uint8_t ClimateControl::getBlowerState() const {
     return state.blowerState;
 }
 
+uint8_t ClimateControl::getDriverSeatHeaterLevel() const {
+    return state.driverSeatHeater;
+}
+
+uint8_t ClimateControl::getPassengerSeatHeaterLevel() const {
+    return state.passengerSeatHeater;
+}
+
 // Bit helper (same as CarControl)
 bool ClimateControl::getBit(uint8_t byte, uint8_t bitPos) const {
     return (byte & (1 << bitPos)) != 0;
 }
 
 // Control functions
-bool ClimateControl::setDriverSeatHeater(bool on) {
+bool ClimateControl::setDriverSeatHeater(uint8_t desiredLevel) {
+    if (!canBus || desiredLevel > 3) return false;
+
+    // Heater cycle: 0→3→2→1→0
+    uint8_t currentPos = state.driverSeatHeater == 0 ? 0 : 4 - state.driverSeatHeater;
+    uint8_t desiredPos = desiredLevel == 0 ? 0 : 4 - desiredLevel;
+    uint8_t clicksNeeded = (desiredPos - currentPos + 4) % 4;
+
+    if (clicksNeeded == 0) return true;
+
+    for (uint8_t i = 0; i < clicksNeeded; i++) {
+        toggleDriverSeatHeater();
+        delay(80);
+    }
+
+    return true;
+}
+
+bool ClimateControl::toggleDriverSeatHeater() {
     if (!canBus) return false;
 
-    // Set command for helper
-    seatHeaterCommand.on = on;
-    seatHeaterCommand.pending = true;
+    // Send button press
+    uint8_t pressData[8] = {0xfd, 0xff};
+    sendCanFrame(0x1e7, pressData, 2);
+    delay(80);
 
-    // Add helper to queue if not already there
-    bool alreadyInQueue = false;
-    for (auto fn : updateFunctions) {
-        if (fn == &updateSeatHeaterControl) {
-            alreadyInQueue = true;
-            break;
-        }
+    // Send button release
+    uint8_t releaseData[8] = {0xfc, 0xff};
+    sendCanFrame(0x1e7, releaseData, 2);
+
+    return true;
+
+}
+
+bool ClimateControl::setPassengerSeatHeater(uint8_t desiredLevel) {
+    if (!canBus || desiredLevel > 3) return false;
+
+    // Heater cycle: 0→3→2→1→0
+    uint8_t currentPos = state.passengerSeatHeater == 0 ? 0 : 4 - state.passengerSeatHeater;
+    uint8_t desiredPos = desiredLevel == 0 ? 0 : 4 - desiredLevel;
+    uint8_t clicksNeeded = (desiredPos - currentPos + 4) % 4;
+
+    if (clicksNeeded == 0) return true;
+
+    for (uint8_t i = 0; i < clicksNeeded; i++) {
+        togglePassengerSeatHeater();
+        if (i < clicksNeeded - 1) delay(BUTTON_PRESS_DURATION_MS);
     }
 
-    if (!alreadyInQueue) {
-        updateFunctions.push_back(&updateSeatHeaterControl);
-    }
+    return true;
+}
+
+bool ClimateControl::togglePassengerSeatHeater() {
+    if (!canBus) return false;
+
+    // Send button press
+    uint8_t pressData[8] = {0xfd, 0xff};
+    sendCanFrame(0x1e8, pressData, 1);
+
+    // Wait
+    delay(BUTTON_PRESS_DURATION_MS);
+
+    // Send button release
+    uint8_t releaseData[8] = {0xfc, 0xff};
+    sendCanFrame(0x1e8, releaseData, 1);
 
     return true;
 }

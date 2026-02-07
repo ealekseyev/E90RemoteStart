@@ -9,5 +9,6 @@
 
 // MCP2515 CAN Controller
 #define MCP2515_CS_PIN 15  // GPIO15 (D8)
+#define MCP2515_INT_PIN 4  // GPIO4 (D2) - Interrupt pin
 
 #endif

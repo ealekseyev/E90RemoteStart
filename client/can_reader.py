@@ -28,8 +28,7 @@ except ImportError:
 
 # CAN IDs to highlight in purple (customize this list as needed)
 PURPLE_IDS = [
-    "0E2", "0E6", "0EA", "0EE", "0F2", "0F6", "0FA", "0FB",
-    "0FC", "0FD", "1A0", "1A3", "1C6", "192", "1E2", "2A0"
+    "23A", "2B4", "7C3", "26E", "130"
 ]
 
 # Color pair constants
@@ -218,7 +217,7 @@ def parse_send_command(command: str):
     return can_id, data_bytes, repeat_ms
 
 
-def read_can_frames_curses(stdscr, input_source: InputSource, source_name: str, blacklist: dict = None):
+def read_can_frames_curses(stdscr, input_source: InputSource, source_name: str, blacklist: dict = None, sort_by_id: bool = False):
     """Read and display CAN frames using curses register-file view.
 
     Args:
@@ -226,6 +225,7 @@ def read_can_frames_curses(stdscr, input_source: InputSource, source_name: str, 
         input_source: InputSource to read from
         source_name: Display name for the source
         blacklist: Optional dict of {can_id: [nibble_indices]} to ignore for highlighting
+        sort_by_id: If True, display CAN IDs in ascending order
     """
     if blacklist is None:
         blacklist = {}
@@ -459,15 +459,21 @@ def read_can_frames_curses(stdscr, input_source: InputSource, source_name: str, 
                         ids_to_draw = [can_id]
 
                         for draw_id in ids_to_draw:
-                            # Calculate row and column based on fixed screen position
-                            # Display 3 CAN IDs per row
-                            screen_pos = can_registers[draw_id]["screen_pos"]
-                            row = header_rows + (screen_pos // 3)
-                            column_idx = screen_pos % 3
+                            # Calculate row and column based on screen position
+                            # Display 4 CAN IDs per row
+                            if sort_by_id:
+                                # Recalculate position based on sorted order
+                                sorted_ids = sorted(can_registers.keys())
+                                screen_pos = sorted_ids.index(draw_id)
+                            else:
+                                # Use fixed arrival-order position
+                                screen_pos = can_registers[draw_id]["screen_pos"]
+                            row = header_rows + (screen_pos // 4)
+                            column_idx = screen_pos % 4
 
-                            # Column starting positions: 0, 40, 80
-                            col_start = column_idx * 40
-                            col_width = 38  # Width of each column section
+                            # Column starting positions: 0, 30, 60, 90
+                            col_start = column_idx * 30
+                            col_width = 28  # Width of each column section
 
                             # Check if row fits on screen
                             if row >= max_y - 1:
@@ -601,6 +607,7 @@ def main():
     parser.add_argument("--blacklist", type=str, help="JSON file with nibbles to ignore (from nibble_monitor.py)")
     parser.add_argument("--log", type=str, metavar="FILE", help="Log raw serial output to file")
     parser.add_argument("--replay", type=str, metavar="FILE", help="Replay from log file instead of serial")
+    parser.add_argument("--sort-by-id", action="store_true", help="Sort CAN frames by ID in ascending order")
 
     args = parser.parse_args()
 
@@ -639,7 +646,7 @@ def main():
             print("Install with: pip install windows-curses\n")
         read_can_frames_simple(input_source, source_name)
     else:
-        curses.wrapper(lambda stdscr: read_can_frames_curses(stdscr, input_source, source_name, blacklist))
+        curses.wrapper(lambda stdscr: read_can_frames_curses(stdscr, input_source, source_name, blacklist, args.sort_by_id))
 
 
 if __name__ == "__main__":

@@ -31,9 +31,14 @@ public:
     int8_t getPassengerTemp() const;       // 16-28 degrees C
     bool isACActive() const;               // true if AC compressor running
     uint8_t getBlowerState() const;        // OR'd flags (BLOWER_*) or BLOWER_AUTO
+    uint8_t getDriverSeatHeaterLevel() const;    // 0=off, 1=low, 2=medium, 3=high
+    uint8_t getPassengerSeatHeaterLevel() const; // 0=off, 1=low, 2=medium, 3=high
 
     // Control functions
-    bool setDriverSeatHeater(bool on);
+    bool setDriverSeatHeater(uint8_t desiredLevel);  // 0=off, 1=low, 2=medium, 3=high
+    bool toggleDriverSeatHeater();  // Advance to next level (one button press)
+    bool setPassengerSeatHeater(uint8_t desiredLevel);  // 0=off, 1=low, 2=medium, 3=high
+    bool togglePassengerSeatHeater();  // Advance to next level (one button press)
 
     // CAN frame sending (public for helper functions)
     bool sendCanFrame(uint16_t id, const uint8_t* data, uint8_t len);
@@ -52,6 +57,8 @@ private:
         int8_t passengerTemp;     // 16-28°C
         bool acActive;            // AC compressor status
         uint8_t blowerState;      // OR'd BLOWER_* flags or BLOWER_AUTO
+        uint8_t driverSeatHeater;    // 0=off, 1=low, 2=medium, 3=high
+        uint8_t passengerSeatHeater; // 0=off, 1=low, 2=medium, 3=high
     } state;
 
     // Vector of update functions (helpers) - each takes ClimateControl* and returns false when done
