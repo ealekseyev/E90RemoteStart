@@ -119,21 +119,16 @@ void print_8bit_binary(unsigned char num) {
 }
 
 bool CarControl::isSteeringButtonPressed(uint8_t mask) const {
-    uint16_t steeringButtons;
-    CRITICAL_SECTION_START();
-    steeringButtons = state.steeringButtonPressed;
-    CRITICAL_SECTION_END();
-
     uint8_t buttonStates = 0;
-    if(steeringButtons & 0b0000100000000000) buttonStates |= STEERING_BTN_VOLUME_UP;
-    if(steeringButtons & 0b0000010000000000) buttonStates |= STEERING_BTN_VOLUME_DOWN;
-    if(steeringButtons & 0b0000000000000001) buttonStates |= STEERING_BTN_SIRI;
-    if(steeringButtons & 0b0000000100000000) buttonStates |= STEERING_BTN_PHONE;
+    if(state.steeringButtonPressed & 0b0000100000000000) buttonStates |= STEERING_BTN_VOLUME_UP;
+    if(state.steeringButtonPressed & 0b0000010000000000) buttonStates |= STEERING_BTN_VOLUME_DOWN;
+    if(state.steeringButtonPressed & 0b0000000000000001) buttonStates |= STEERING_BTN_SIRI;
+    if(state.steeringButtonPressed & 0b0000000100000000) buttonStates |= STEERING_BTN_PHONE;
 
-    if(steeringButtons & 0b0000000001000000) buttonStates |= STEERING_BTN_CUSTOM;
-    if(steeringButtons & 0b0000000000010000) buttonStates |= STEERING_BTN_CHANNEL;
-    if(steeringButtons & 0b0010000000000000) buttonStates |= STEERING_BTN_PREV;
-    if(steeringButtons & 0b0001000000000000) buttonStates |= STEERING_BTN_NEXT;
+    if(state.steeringButtonPressed & 0b0000000001000000) buttonStates |= STEERING_BTN_CUSTOM;
+    if(state.steeringButtonPressed & 0b0000000000010000) buttonStates |= STEERING_BTN_CHANNEL;
+    if(state.steeringButtonPressed & 0b0010000000000000) buttonStates |= STEERING_BTN_PREV;
+    if(state.steeringButtonPressed & 0b0001000000000000) buttonStates |= STEERING_BTN_NEXT;
     return (buttonStates & mask) > 0;
 }
 
@@ -150,11 +145,7 @@ uint8_t CarControl::getDomeLightBrightness() const {
 }
 
 float CarControl::getBatteryVoltage() const {
-    float voltage;
-    CRITICAL_SECTION_START();
-    voltage = state.batteryVoltage;
-    CRITICAL_SECTION_END();
-    return voltage;
+    return state.batteryVoltage;
 }
 
 bool CarControl::isEngineRunning() const {
@@ -245,11 +236,7 @@ uint8_t CarControl::getWindowPosition(uint8_t window) const {
 }
 
 uint16_t CarControl::getEngineRPM() const {
-    uint16_t rpm;
-    CRITICAL_SECTION_START();
-    rpm = state.engineRPM;
-    CRITICAL_SECTION_END();
-    return rpm;
+    return state.engineRPM;
 }
 
 uint8_t CarControl::getThrottlePosition() const {
@@ -257,19 +244,11 @@ uint8_t CarControl::getThrottlePosition() const {
 }
 
 float CarControl::getSteeringWheelAngle() const {
-    float angle;
-    CRITICAL_SECTION_START();
-    angle = state.steeringWheelAngle;
-    CRITICAL_SECTION_END();
-    return angle;
+    return state.steeringWheelAngle;
 }
 
 float CarControl::getSpeed() const {
-    float speed;
-    CRITICAL_SECTION_START();
-    speed = state.speed;
-    CRITICAL_SECTION_END();
-    return speed;
+    return state.speed;
 }
 
 int8_t CarControl::getEngineTemp() const {
@@ -277,19 +256,11 @@ int8_t CarControl::getEngineTemp() const {
 }
 
 uint32_t CarControl::getOdometer() const {
-    uint32_t odometer;
-    CRITICAL_SECTION_START();
-    odometer = state.odometer;
-    CRITICAL_SECTION_END();
-    return odometer;
+    return state.odometer;
 }
 
 float CarControl::getRange() const {
-    float range;
-    CRITICAL_SECTION_START();
-    range = state.range;
-    CRITICAL_SECTION_END();
-    return range;
+    return state.range;
 }
 
 uint8_t CarControl::getFuelLevel() const {
@@ -297,12 +268,7 @@ uint8_t CarControl::getFuelLevel() const {
 }
 
 float CarControl::getTorque() const {
-    if (!isEngineRunning()) return 0.0;
-    float torque;
-    CRITICAL_SECTION_START();
-    torque = state.torque;
-    CRITICAL_SECTION_END();
-    return torque;
+    return isEngineRunning() ? state.torque : 0.0;
 }
 
 float CarControl::getPower() const {

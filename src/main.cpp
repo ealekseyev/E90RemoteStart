@@ -5,7 +5,6 @@
 #include "CarControl.hpp"
 #include "ClimateControl.hpp"
 #include "CustomKeys.h"
-#include "Logger.hpp"
 #ifdef ENABLE_WEBSERVER
 #include "WebServer.hpp"
 #endif
@@ -71,11 +70,7 @@ void setup() {
     carControl->init(&can);
     climateControl->init(&can);
     customKeys->init(carControl);
-
-    // Register control objects with CANBus for ISR access
-    can.setControlObjects(carControl, climateControl);
-
-    Serial.println("CAN Ready (ISR-Direct Mode)");
+    Serial.println("CAN Ready (Interrupt Mode)");
 
 #ifdef ENABLE_WEBSERVER
     webServer->init(carControl, climateControl);
@@ -107,8 +102,26 @@ void loop() {
 
     wasCranking = isCranking;
 
-    // Process deferred log entries (state already updated by ISR)
-    Logger::processNextLog(carControl, climateControl);
+    CANFrame frame;
+    if (can.readBuffered(frame)) {
+        carControl->onCanFrameReceived(frame);
+        climateControl->onCanFrameReceived(frame);
+
+#ifdef DEBUG_MODE
+        // Raw CAN frame output
+        Serial.print("RX: 0x");
+        if (frame.id < 0x100) Serial.print("0");
+        if (frame.id < 0x10) Serial.print("0");
+        Serial.print(frame.id, HEX);
+        Serial.print(" Data:");
+        for (uint8_t i = 0; i < frame.dlc; i++) {
+            Serial.print(" ");
+            if (frame.data[i] < 0x10) Serial.print("0");
+            Serial.print(frame.data[i], HEX);
+        }
+        Serial.println();
+#endif
+    }
 
     while (Serial.available()) {
         char c = Serial.read();

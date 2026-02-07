@@ -86,16 +86,10 @@ void CustomKeys::update() {
 }
 
 void CustomKeys::onSinglePress() {
-    // static bool state = false;
-    // if(!state) {
-    //     climateControl->setDriverSeatHeater(3);
-    //     climateControl->setPassengerSeatHeater(3);
-    //     state = true;
-    // } else {
-    //     climateControl->setDriverSeatHeater(0);
-    //     climateControl->setPassengerSeatHeater(0);
-    //     state = false;
-    // }
+    carControl->playGong();
+}
+
+void CustomKeys::onDoublePress() {
     static bool off = true;
     if(off) {
         carControl->toggleTractionControl(false);
@@ -106,31 +100,34 @@ void CustomKeys::onSinglePress() {
         climateControl->setDriverSeatHeater(0);
         off = true;
     }
-}
+    
+    // static WindowPosition lastAction = WINDOW_ROLL_UP; // false is roll down, true is roll up
+    // // Current window toggle implementation
+    // if (!carControl) return;
 
-void CustomKeys::onDoublePress() {
-    static WindowPosition lastAction = WINDOW_ROLL_UP; // false is roll down, true is roll up
-    // Current window toggle implementation
-    if (!carControl) return;
+    // uint8_t posPassengerRear = carControl->getWindowPosition(PASSENGER_REAR);
 
-    uint8_t posPassengerRear = carControl->getWindowPosition(PASSENGER_REAR);
+    // WindowPosition targetPos;
+    // // if the window is rolled mostly up but last action was to roll down, roll back up
+    // if(posPassengerRear > 230) {
+    //     targetPos = WINDOW_ROLL_UP;
+    // // if the window is rolled mostly down but last action was to roll up, roll back down
+    // } else if(posPassengerRear < 25) {
+    //     targetPos = WINDOW_ROLL_DOWN;
+    // } else {
+    //     targetPos = (lastAction == WINDOW_ROLL_UP) ? WINDOW_ROLL_DOWN:WINDOW_ROLL_UP;
+    // }
 
-    WindowPosition targetPos;
-    // if the window is rolled mostly up but last action was to roll down, roll back up
-    if(posPassengerRear > 230) {
-        targetPos = WINDOW_ROLL_UP;
-    // if the window is rolled mostly down but last action was to roll up, roll back down
-    } else if(posPassengerRear < 25) {
-        targetPos = WINDOW_ROLL_DOWN;
-    } else {
-        targetPos = (lastAction == WINDOW_ROLL_UP) ? WINDOW_ROLL_DOWN:WINDOW_ROLL_UP;
-    }
+    // carControl->setWindow(PASSENGER_REAR | DRIVER_REAR, targetPos);
 
-    carControl->setWindow(PASSENGER_REAR | DRIVER_REAR, targetPos);
-
-    lastAction = targetPos;
+    // lastAction = targetPos;
 }
 
 void CustomKeys::onLongPress() {
-    carControl->playGong();
+    //carControl->isSteeringButtonPressed(STEERING_BTN_CUSTOM)
+    long start = millis();
+    while(millis()-start < 1000) {
+        carControl->spoofReverseLights();
+        delay(1);
+    }
 }

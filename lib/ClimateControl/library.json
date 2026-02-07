@@ -1,8 +1,0 @@
-{
-  "name": "ClimateControl",
-  "version": "1.0.0",
-  "dependencies": {
-    "canbus": "*",
-    "autowp/autowp-mcp2515": "^1.0.3"
-  }
-}

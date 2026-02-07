@@ -5,20 +5,6 @@
 #include <vector>
 #include "canbus.h"
 
-// Critical section macros for ESP8266/ESP32
-#if defined(ESP8266)
-    #define CRITICAL_SECTION_START() noInterrupts()
-    #define CRITICAL_SECTION_END() interrupts()
-#elif defined(ESP32)
-    #include <esp32-hal.h>
-    static portMUX_TYPE carControlMux = portMUX_INITIALIZER_UNLOCKED;
-    #define CRITICAL_SECTION_START() portENTER_CRITICAL(&carControlMux)
-    #define CRITICAL_SECTION_END() portEXIT_CRITICAL(&carControlMux)
-#else
-    #define CRITICAL_SECTION_START()
-    #define CRITICAL_SECTION_END()
-#endif
-
 enum WindowPosition {
     WINDOW_NEUTRAL,
     WINDOW_ROLL_DOWN,

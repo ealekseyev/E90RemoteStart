@@ -1,15 +1,10 @@
 #include "canbus.h"
-#include "CarControl.hpp"
-#include "ClimateControl.hpp"
-#include "Logger.hpp"
 #include "config.h"
 #include <SPI.h>
 #include <Arduino.h>
 
-// Global pointers for ISR access
+// Global pointer for ISR access
 static CANBus* g_canBus = nullptr;
-static CarControl* g_carControl = nullptr;
-static ClimateControl* g_climateControl = nullptr;
 
 // ISR function
 void IRAM_ATTR canISR() {
@@ -18,7 +13,8 @@ void IRAM_ATTR canISR() {
     }
 }
 
-CANBus::CANBus(uint8_t csPin) : mcp(csPin), interruptPin(0), interruptEnabled(false) {}
+CANBus::CANBus(uint8_t csPin) : mcp(csPin), interruptPin(0), interruptEnabled(false),
+                                 bufferHead(0), bufferTail(0) {}
 
 bool CANBus::init(uint32_t bitrate) {
     SPI.begin();
@@ -89,23 +85,45 @@ bool CANBus::read(CANFrame& frame) {
     return true;
 }
 
-void CANBus::setControlObjects(void* car, void* climate) {
-    g_carControl = (CarControl*)car;
-    g_climateControl = (ClimateControl*)climate;
+bool CANBus::readBuffered(CANFrame& frame) {
+    return bufferGet(frame);
 }
 
 void IRAM_ATTR CANBus::handleInterrupt() {
     CANFrame frame;
     if (read(frame)) {
-        // Update state immediately (ISR context)
-        if (g_carControl) {
-            g_carControl->onCanFrameReceived(frame);
-        }
-        if (g_climateControl) {
-            g_climateControl->onCanFrameReceived(frame);
-        }
-
-        // Buffer for deferred logging
-        Logger::bufferLogEntry(frame);
+        bufferPut(frame);
     }
+}
+
+bool CANBus::bufferPut(const CANFrame& frame) {
+    uint8_t nextHead = (bufferHead + 1) % CAN_BUFFER_SIZE;
+
+    if (nextHead == bufferTail) {
+        return false;  // Buffer overflow
+    }
+
+    // Copy field-by-field due to volatile
+    buffer[bufferHead].id = frame.id;
+    buffer[bufferHead].dlc = frame.dlc;
+    for (uint8_t i = 0; i < 8; i++) {
+        buffer[bufferHead].data[i] = frame.data[i];
+    }
+    bufferHead = nextHead;
+    return true;
+}
+
+bool CANBus::bufferGet(CANFrame& frame) {
+    if (bufferHead == bufferTail) {
+        return false;  // Buffer empty
+    }
+
+    // Copy field-by-field due to volatile
+    frame.id = buffer[bufferTail].id;
+    frame.dlc = buffer[bufferTail].dlc;
+    for (uint8_t i = 0; i < 8; i++) {
+        frame.data[i] = buffer[bufferTail].data[i];
+    }
+    bufferTail = (bufferTail + 1) % CAN_BUFFER_SIZE;
+    return true;
 }

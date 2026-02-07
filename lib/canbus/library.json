@@ -1,7 +1,0 @@
-{
-  "name": "canbus",
-  "version": "1.0.0",
-  "dependencies": {
-    "autowp/autowp-mcp2515": "^1.0.3"
-  }
-}
