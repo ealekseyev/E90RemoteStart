@@ -83,6 +83,7 @@ public:
     bool toggleTractionControl(bool completelyOff);
     bool sendFakeRPM(uint16_t rpm);
     bool spoofReverseLights();
+    bool error(uint16_t name);
 
     // CAN frame sending (public for helper functions)
     bool sendCanFrame(uint16_t id, const uint8_t* data, uint8_t len);

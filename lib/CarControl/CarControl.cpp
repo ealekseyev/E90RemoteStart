@@ -385,8 +385,8 @@ bool CarControl::sendFakeRPM(uint16_t rpm) {
 bool CarControl::spoofReverseLights() {
     if (!canBus) return false;
 
-    uint8_t data[2] = {0xFE, 0xFF};
-    return sendCanFrame(0x3b0, data, 2);
+    uint8_t data[2] = {0xC2, 0xFF};
+    return sendCanFrame(0x304, data, 2);
 }
 
 uint8_t min(uint8_t a, uint8_t b) {

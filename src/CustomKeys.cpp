@@ -87,6 +87,9 @@ void CustomKeys::update() {
 
 void CustomKeys::onSinglePress() {
     carControl->playGong();
+    delay(100);
+    uint16_t randomValue = 30; //random(0x00, 0x200);  // 0x00 to 0x1FF
+    carControl->error(randomValue);
 }
 
 void CustomKeys::onDoublePress() {
