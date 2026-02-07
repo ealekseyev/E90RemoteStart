@@ -21,8 +21,6 @@ String serialBuffer = "";
 
 // RPM sweep state tracking (gauge cluster only)
 static bool wasCranking = false;
-static unsigned long lastSweepTime = 0;
-static const unsigned long SWEEP_COOLDOWN = 5000;  // 5 seconds
 
 uint8_t hexCharToNibble(char c) {
     if (c >= '0' && c <= '9') return c - '0';
@@ -66,11 +64,11 @@ void setup() {
     Serial.begin(SERIAL_BAUD_RATE);
     while (!Serial);
 
-    can.initInterrupt(CAN_BITRATE, MCP2515_INT_PIN);
+    can.init(CAN_BITRATE);
     carControl->init(&can);
     climateControl->init(&can);
     customKeys->init(carControl);
-    Serial.println("CAN Ready (Interrupt Mode)");
+    Serial.println("CAN Ready");
 
 #ifdef ENABLE_WEBSERVER
     webServer->init(carControl, climateControl);
@@ -90,20 +88,17 @@ void loop() {
     bool isCranking = carControl->isEngineCranking();
 
     if (!isCranking && wasCranking) {
-        if (millis() - lastSweepTime >= SWEEP_COOLDOWN) {
-            unsigned long start = millis();
-            while (millis() - start < 800) {
-                carControl->sendFakeRPM(7000);
-                delay(2);
-            }
-            lastSweepTime = millis();
+        unsigned long start = millis();
+        while (millis() - start < 800) {
+            carControl->sendFakeRPM(7000);
+            delay(2);
         }
     }
 
     wasCranking = isCranking;
 
     CANFrame frame;
-    if (can.readBuffered(frame)) {
+    if (can.read(frame)) {
         carControl->onCanFrameReceived(frame);
         climateControl->onCanFrameReceived(frame);
 
